@@ -1,6 +1,8 @@
-﻿using System;
+﻿using log4net;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Web;
 using System.Web.Mvc;
 using System.Web.Routing;
@@ -10,6 +12,7 @@ namespace DevTrends.MvcDonutCaching
     public class KeyGenerator : IKeyGenerator
     {
         private readonly IKeyBuilder _keyBuilder;
+        private ILog log = LogManager.GetLogger(typeof(KeyGenerator));
 
         public KeyGenerator(IKeyBuilder keyBuilder)
         {
@@ -23,98 +26,170 @@ namespace DevTrends.MvcDonutCaching
 
         public string GenerateKey(ControllerContext context, CacheSettings cacheSettings)
         {
-            var actionName     = context.RouteData.Values["action"].ToString();
-            var controllerName = context.RouteData.Values["controller"].ToString();
-            string areaName    = null;
+            var debugTraceBuilder = new StringBuilder();
 
-            if (context.RouteData.DataTokens.ContainsKey("area"))
+            try
             {
-                areaName = context.RouteData.DataTokens["area"].ToString();
-            }
 
-            // remove controller, action and DictionaryValueProvider which is added by the framework for child actions
-            var filteredRouteData = context.RouteData.Values.Where(
-                x => x.Key.ToLowerInvariant() != "controller" && 
-                     x.Key.ToLowerInvariant() != "action" &&   
-                     x.Key.ToLowerInvariant() != "area" &&
-                     !(x.Value is DictionaryValueProvider<object>)
-            ).ToList();
+                debugTraceBuilder.AppendLine("Retrieving Route Data Values");
 
-            if (!string.IsNullOrWhiteSpace(areaName))
-            {
-                filteredRouteData.Add(new KeyValuePair<string, object>("area", areaName));
-            }
+                var actionName = context.RouteData.Values["action"].ToString();
+                debugTraceBuilder.AppendLine(string.Format("Retrieved Action Name: {0}", actionName));
 
-            var routeValues = new RouteValueDictionary(filteredRouteData.ToDictionary(x => x.Key.ToLowerInvariant(), x => x.Value));
+                var controllerName = context.RouteData.Values["controller"].ToString();
+                debugTraceBuilder.AppendLine(string.Format("Retrieved Controller Name: {0}", controllerName));
 
-            if (!context.IsChildAction)
-            {
-                // note that route values take priority over form values and form values take priority over query string values
+                string areaName = null;
 
-                if ((cacheSettings.Options & OutputCacheOptions.IgnoreFormData) != OutputCacheOptions.IgnoreFormData)
+                if (context.RouteData.DataTokens.ContainsKey("area"))
                 {
-                    foreach (var formKey in context.HttpContext.Request.Form.AllKeys)
+                    areaName = context.RouteData.DataTokens["area"].ToString();
+                    debugTraceBuilder.AppendLine(string.Format("Retrieved Area Name: {0}", areaName));
+                }
+
+                debugTraceBuilder.AppendLine("Retrieving Route Data Values Completed");
+
+                debugTraceBuilder.AppendLine("Filtering Route Data");
+
+                // remove controller, action and DictionaryValueProvider which is added by the framework for child actions
+                var filteredRouteData = context.RouteData.Values.Where(
+                    x => x.Key.ToLowerInvariant() != "controller" &&
+                         x.Key.ToLowerInvariant() != "action" &&
+                         x.Key.ToLowerInvariant() != "area" &&
+                         !(x.Value is DictionaryValueProvider<object>)
+                ).ToList();
+
+                debugTraceBuilder.AppendLine("Filtering Route Data Completed");
+
+                if (!string.IsNullOrWhiteSpace(areaName))
+                {
+                    debugTraceBuilder.AppendLine("Re-Adding Area to Filtered Route Data");
+                    filteredRouteData.Add(new KeyValuePair<string, object>("area", areaName));
+                    debugTraceBuilder.AppendLine("Re-Adding Area to Filtered Route Data Completed");
+                }
+
+                debugTraceBuilder.AppendLine("Creating RouteValueDictionary from Filtered Route Data");
+                var routeValues = new RouteValueDictionary(filteredRouteData.ToDictionary(x => x.Key.ToLowerInvariant(), x => x.Value));
+                debugTraceBuilder.AppendLine("Creating RouteValueDictionary from Filtered Route Data Completed");
+
+                if (!context.IsChildAction)
+                {
+                    debugTraceBuilder.AppendLine("Processing As Non-Child Action");
+                    // note that route values take priority over form values and form values take priority over query string values
+
+                    if ((cacheSettings.Options & OutputCacheOptions.IgnoreFormData) != OutputCacheOptions.IgnoreFormData)
                     {
-                        if (routeValues.ContainsKey(formKey.ToLowerInvariant()))
+                        debugTraceBuilder.AppendLine("Processing FormData");
+
+                        foreach (var formKey in context.HttpContext.Request.Form.AllKeys)
                         {
-                            continue;
+                            debugTraceBuilder.AppendLine(string.Format("Processing FormData With Key: '{0}'", formKey));
+
+                            if (routeValues.ContainsKey(formKey.ToLowerInvariant()))
+                            {
+                                debugTraceBuilder.AppendLine(string.Format("RouteValues already contains data with Key: '{0}', so skipping FormData value", formKey));
+                                continue;
+                            }
+
+                            debugTraceBuilder.AppendLine(string.Format("Adding FormData With Key: '{0}' to RouteValues", formKey));
+
+                            var item = context.HttpContext.Request.Form[formKey];
+                            routeValues.Add(
+                                formKey.ToLowerInvariant(),
+                                item != null
+                                    ? item.ToLowerInvariant()
+                                    : string.Empty
+                            );
+
+                            debugTraceBuilder.AppendLine(string.Format("Adding FormData With Key: '{0}' to RouteValues Completed", formKey));
+                            debugTraceBuilder.AppendLine(string.Format("Processing FormData With Key: '{0}' Completed", formKey));
                         }
 
-                        var item = context.HttpContext.Request.Form[formKey];
-                        routeValues.Add(
-                            formKey.ToLowerInvariant(),
-                            item != null 
-                                ? item.ToLowerInvariant() 
-                                : string.Empty
-                        );
+                        debugTraceBuilder.AppendLine("Processing FormData Completed");
                     }
-                }
 
-                if ((cacheSettings.Options & OutputCacheOptions.IgnoreQueryString) != OutputCacheOptions.IgnoreQueryString)
-                {
-                    foreach (var queryStringKey in context.HttpContext.Request.QueryString.AllKeys)
+                    if ((cacheSettings.Options & OutputCacheOptions.IgnoreQueryString) != OutputCacheOptions.IgnoreQueryString)
                     {
-                        // queryStringKey is null if url has qs name without value. e.g. test.com?q
-                        if (queryStringKey == null || routeValues.ContainsKey(queryStringKey.ToLowerInvariant()))
+                        debugTraceBuilder.AppendLine("Processing QueryString");
+
+                        foreach (var queryStringKey in context.HttpContext.Request.QueryString.AllKeys)
                         {
-                            continue;
+                            debugTraceBuilder.AppendLine(string.Format("Processing QueryString With Key: '{0}'", queryStringKey));
+
+                            // queryStringKey is null if url has qs name without value. e.g. test.com?q
+                            if (queryStringKey == null || routeValues.ContainsKey(queryStringKey.ToLowerInvariant()))
+                            {
+                                debugTraceBuilder.AppendLine(string.Format("RouteValues already contains data with Key: '{0}', so skipping QueryString value", queryStringKey));
+                                continue;
+                            }
+
+                            debugTraceBuilder.AppendLine(string.Format("Adding QueryString with Key: '{0}' to RouteValues", queryStringKey));
+
+                            var item = context.HttpContext.Request.QueryString[queryStringKey];
+                            routeValues.Add(
+                                queryStringKey.ToLowerInvariant(),
+                                item != null
+                                    ? item.ToLowerInvariant()
+                                    : string.Empty
+                            );
+
+                            debugTraceBuilder.AppendLine(string.Format("Adding QueryString With Key: '{0}' to RouteValues Completed", queryStringKey));
+                            debugTraceBuilder.AppendLine(string.Format("Processing QueryString With Key: '{0}' Completed", queryStringKey));
                         }
 
-                        var item = context.HttpContext.Request.QueryString[queryStringKey];
-                        routeValues.Add(
-                            queryStringKey.ToLowerInvariant(),
-                            item != null 
-                                ? item.ToLowerInvariant() 
-                                : string.Empty
-                        );
+                        debugTraceBuilder.AppendLine("Processing QueryString Completed");
                     }
-                }
-            }
 
-            if (!string.IsNullOrEmpty(cacheSettings.VaryByParam))
-            {
-                if (cacheSettings.VaryByParam.ToLowerInvariant() == "none")
+                    debugTraceBuilder.AppendLine("Processing As Non-Child Action Completed");
+                }
+
+                if (!string.IsNullOrEmpty(cacheSettings.VaryByParam))
                 {
-                    routeValues.Clear();
+                    debugTraceBuilder.AppendLine("Processing VaryByParam");
+
+                    if (cacheSettings.VaryByParam.ToLowerInvariant() == "none")
+                    {
+                        debugTraceBuilder.AppendLine("Clearing RouteValues since VaryByParam set to 'none'");
+                        routeValues.Clear();
+                        debugTraceBuilder.AppendLine("Clearing RouteValues Completed");
+                    }
+                    else if (cacheSettings.VaryByParam != "*")
+                    {
+                        debugTraceBuilder.AppendLine("Extracting VaryByParam Parameters");
+                        var parameters = cacheSettings.VaryByParam.ToLowerInvariant().Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                        debugTraceBuilder.AppendLine(string.Format("Extracting VaryByParam Parameters Completed. Parameters: {0}", parameters));
+
+                        debugTraceBuilder.AppendLine("Setting RouteValues To Only Extracted Parameters");
+                        routeValues = new RouteValueDictionary(routeValues.Where(x => parameters.Contains(x.Key)).ToDictionary(x => x.Key, x => x.Value));
+                        debugTraceBuilder.AppendLine("Setting RouteValues To Only Extracted Parameters Completed");
+                    }
+
+                    debugTraceBuilder.AppendLine("Processing VaryByParam Completed");
                 }
-                else if (cacheSettings.VaryByParam != "*")
+
+                if (!string.IsNullOrEmpty(cacheSettings.VaryByCustom))
                 {
-                    var parameters = cacheSettings.VaryByParam.ToLowerInvariant().Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                    routeValues = new RouteValueDictionary(routeValues.Where(x => parameters.Contains(x.Key)).ToDictionary(x => x.Key, x => x.Value));
+                    debugTraceBuilder.AppendLine("Processing VaryByCustom");
+
+                    routeValues.Add(
+                        cacheSettings.VaryByCustom.ToLowerInvariant(),
+                        context.HttpContext.ApplicationInstance.GetVaryByCustomString(HttpContext.Current, cacheSettings.VaryByCustom)
+                    );
+
+                    debugTraceBuilder.AppendLine("Processing VaryByCustom Completed");
                 }
-            }
 
-            if (!string.IsNullOrEmpty(cacheSettings.VaryByCustom))
+                debugTraceBuilder.AppendLine(string.Format("Building Key with Controller: {0}, Action: {1}, RouteValues: {2}", controllerName, actionName, routeValues));
+                var key = _keyBuilder.BuildKey(controllerName, actionName, routeValues);
+                debugTraceBuilder.AppendLine("Building Key Completed");
+
+                return key;
+            }
+            catch(Exception ex)
             {
-                routeValues.Add(
-                    cacheSettings.VaryByCustom.ToLowerInvariant(),
-                    context.HttpContext.ApplicationInstance.GetVaryByCustomString(HttpContext.Current, cacheSettings.VaryByCustom)
-                );
+                log.Error(debugTraceBuilder, ex);
+                throw;
             }
-
-            var key = _keyBuilder.BuildKey(controllerName, actionName, routeValues);
-
-            return key;
         }
     }
 }
