@@ -187,7 +187,7 @@ namespace DevTrends.MvcDonutCaching
             }
             catch(Exception ex)
             {
-                log.Error(debugTraceBuilder, ex);
+                log.Error(debugTraceBuilder.ToString(), ex);
                 throw;
             }
         }
