@@ -171,10 +171,8 @@ namespace DevTrends.MvcDonutCaching
                 {
                     debugTraceBuilder.AppendLine("Processing VaryByCustom");
 
-                    routeValues.Add(
-                        cacheSettings.VaryByCustom.ToLowerInvariant(),
-                        context.HttpContext.ApplicationInstance.GetVaryByCustomString(HttpContext.Current, cacheSettings.VaryByCustom)
-                    );
+                    routeValues[cacheSettings.VaryByCustom.ToLowerInvariant()] =
+                            context.HttpContext.ApplicationInstance.GetVaryByCustomString(HttpContext.Current, cacheSettings.VaryByCustom);
 
                     debugTraceBuilder.AppendLine("Processing VaryByCustom Completed");
                 }
